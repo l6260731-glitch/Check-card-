@@ -190,16 +190,18 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(API_TOKEN).build()
 
-    # إضافة الموزعات (Handlers)
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("site", site_command))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
-
-    # لحظر غير الأدمن من إرسال أي رسائل عشوائية للبوت
-    @app.on_message(filters.TEXT & ~filters.COMMAND)
+    # 1. إضافة دالة لحظر غير الأدمن من إرسال رسائل نصية عشوائية (بالطريقة الصحيحة)
     async def block_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_admin(update.effective_user.id):
             await update.message.reply_text("❌ حسابك مش متفعل.")
+
+    # 2. إضافة الموزعات (Handlers) بالترتيب
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("site", site_command))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    
+    # هذا السطر يستبدل الـ @app.on_message التي سببت المشكلة
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_text))
 
     print("Bot Started...")
     app.run_polling()
