@@ -131,39 +131,118 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = check_user_status(user_id)
     
     if status == "blocked":
-        await update.message.reply_text("⛔ ACCESS DENIED\nYour account has been blocked.")
+        await update.message.reply_text("⛔ *ACCESS DENIED*\nYour account has been blocked by the Admin.", parse_mode="Markdown")
         return
     elif status == "expired":
-        await update.message.reply_text(f"⚠️ ACCOUNT NOT ACTIVATED\n\nYour ID: {user_id}\nSend this ID to Admin.")
+        await update.message.reply_text(
+            f"⚠️ *ACCOUNT NOT ACTIVATED*\n\n"
+            f"Your account status is currently: *Inactive*\n"
+            f"🔑 Your Telegram ID: `{user_id}`\n\n"
+            f"Please send your ID to the Admin to activate your account.", 
+            parse_mode="Markdown"
+        )
         return
 
     time_left = get_remaining_time(user_id)
-    await update.message.reply_text(f"👑 WELCOME\nStatus: Premium\nTime Left: {time_left}\n\nUpload .txt file to start.")
+    welcome_text = (
+        f"👑 *WELCOME TO URL CHECKER BOT* 👑\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔮 *Status:* `Active Premium`\n"
+        f"⏳ *Time Left:* `{time_left}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚡ _Upload a .txt file to start bulk checking seamlessly._\n\n"
+        f"💡 Type /help to see all available commands."
+    )
+    await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = "• /start - Status\n• /site <url> - Check one URL\n• Send .txt file for bulk check"
-    await update.message.reply_text(help_text)
+    user_id = update.effective_user.id
+    status = check_user_status(user_id)
+    
+    if status in ["blocked", "expired"]:
+        await update.message.reply_text("❌ Subscription required to use this bot.")
+        return
+
+    help_text = (
+        f"📖 *BOT COMMANDS MENU* 📖\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"• `/start` ➜ Check your subscription status\n"
+        f"• `/help` ➜ View this help menu\n"
+        f"• `/site <url>` ➜ Check a single URL status\n"
+        f"• 📂 *Bulk File Check:* Drop any `.txt` file containing your links to check\n"
+    )
+
+    if is_admin(user_id):
+        help_text += (
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👑 *ADMIN MANAGEMENT CONTROLS* 👑\n"
+            f"• `/admin` ➜ Open Admin control panel & bot stats\n"
+            f"• `/activate <id> <time> <d/h>` ➜ Activate user\n"
+            f"  _Example: `/activate 1234567 7 d` (Activates for 7 Days)_\n"
+            f"• `/block <id>` ➜ Block user from using the bot\n"
+            f"• `/unblock <id>` ➜ Unblock user\n"
+            f"• `/revoke <id>` ➜ Delete user subscription time"
+        )
+
+    await update.message.reply_text(help_text, parse_mode="Markdown")
 
 async def site_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     status = check_user_status(user_id)
-    if status in ["blocked", "expired"]: return
+    
+    if status in ["blocked", "expired"]:
+        await update.message.reply_text("❌ Subscription required.")
+        return
 
     if not context.args:
-        await update.message.reply_text("Usage: /site domain.com")
+        await update.message.reply_text("⚡ *Usage:* `/site domain.com`", parse_mode="Markdown")
         return
 
     url = " ".join(context.args)
+    status_msg = await update.message.reply_text("📡 *Checking target URL... Please wait...*", parse_mode="Markdown")
+
     async with httpx.AsyncClient() as client:
         result = await check_url_async(client, url)
-    
-    await update.message.reply_text(f"🔗 URL: {url}\n📟 Response: {result}")
 
-# ========= ADMIN COMMANDS =========
+    STATS["total_checked"] += 1
+    if is_link_live(result):
+        STATS["total_live"] += 1
+        await status_msg.edit_text(
+            f"🟢 *RESULT: LIVE LINK*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔗 *URL:* {url}\n"
+            f"📟 *Response:* `{result}`", 
+            parse_mode="Markdown"
+        )
+    else:
+        STATS["total_dead"] += 1
+        await status_msg.edit_text(f"🔴 *RESULT: DEAD/FILTERED* ➜ (Response: `{result}`)", parse_mode="Markdown")
+
+# ========= ADMIN DASHBOARD =========
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id): return
-    await update.message.reply_text(f"📊 Stats:\nChecked: {STATS['total_checked']}\nLive: {STATS['total_live']}\nDead: {STATS['total_dead']}")
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Unauthorized.")
+        return
+
+    total_users = len(db)
+    blocked_users = sum(1 for u in db.values() if u.get("blocked", False))
+
+    admin_panel_text = (
+        f"⚙️ *ADMIN CONTROL DASHBOARD* ⚙️\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Bot Statistics:*\n"
+        f" • Total Checked Links: `{STATS['total_checked']}`\n"
+        f" • Total Live Links Found: `{STATS['total_live']}`\n"
+        f" • Total Dead Links Filtered: `{STATS['total_dead']}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 *User Management Statistics:*\n"
+        f" • Total Registered Users: `{total_users}`\n"
+        f" • Total Blocked Users: `{blocked_users}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💎 *Server Status:* `Running Smoothly on Railway`"
+    )
+    await update.message.reply_text(admin_panel_text, parse_mode="Markdown")
 
 async def activate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id): return
@@ -171,78 +250,154 @@ async def activate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_target = context.args[0]
         amount = int(context.args[1])
         unit = context.args[2].lower()
-        expire_date = datetime.now() + timedelta(days=amount) if unit == 'd' else datetime.now() + timedelta(hours=amount)
-        db[str(user_target)] = {"expires_at": expire_date.isoformat(), "blocked": False}
+
+        if unit == 'd':
+            expire_date = datetime.now() + timedelta(days=amount)
+            unit_str = "Days"
+        elif unit == 'h':
+            expire_date = datetime.now() + timedelta(hours=amount)
+            unit_str = "Hours"
+        else:
+            raise ValueError
+
+        db[str(user_target)] = {
+            "expires_at": expire_date.isoformat(),
+            "blocked": False
+        }
         save_db(db)
-        await update.message.reply_text(f"✅ Activated {user_target}")
+        await update.message.reply_text(
+            f"✅ *USER ACTIVATED SUCCESSFULLY*\n"
+            f"User `{user_target}` has been activated for *{amount} {unit_str}*.\n"
+            f"📅 *Expiry Date:* `{expire_date.strftime('%Y-%m-%d %H:%M:%S')}`", 
+            parse_mode="Markdown"
+        )
     except:
-        await update.message.reply_text("Format: /activate <id> <amount> <d/h>")
+        await update.message.reply_text("❌ *Wrong Format.* Use: `/activate <id> <amount> <d/h>`", parse_mode="Markdown")
 
 async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id): return
+    if not context.args: return
     user_target = context.args[0]
-    db[str(user_target)] = {"blocked": True}
+    if str(user_target) not in db: db[str(user_target)] = {}
+    db[str(user_target)]["blocked"] = True
     save_db(db)
-    await update.message.reply_text(f"🚫 Blocked {user_target}")
+    await update.message.reply_text(f"🚫 *USER BLOCKED* ➜ ID `{user_target}` has been blacklisted.", parse_mode="Markdown")
 
 async def unblock_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id): return
+    if not context.args: return
     user_target = context.args[0]
-    if str(user_target) in db: db[str(user_target)]["blocked"] = False
-    save_db(db)
-    await update.message.reply_text(f"🟢 Unblocked {user_target}")
+    if str(user_target) in db:
+        db[str(user_target)]["blocked"] = False
+        save_db(db)
+        await update.message.reply_text(f"🟢 *USER UNBLOCKED* ➜ ID `{user_target}` access restored.", parse_mode="Markdown")
 
 async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id): return
+    if not context.args: return
     user_target = context.args[0]
-    if str(user_target) in db: db[str(user_target)]["expires_at"] = None
-    save_db(db)
-    await update.message.reply_text(f"⚠️ Revoked {user_target}")
+    if str(user_target) in db:
+        db[str(user_target)]["expires_at"] = None
+        save_db(db)
+        await update.message.reply_text(f"⚠️ *SUBSCRIPTION REVOKED* ➜ Subscription wiped for ID `{user_target}`.", parse_mode="Markdown")
 
-# ========= FILE HANDLER (OLD VERSION - SENDS EACH SITE DIRECTLY) =========
+# ========= FILE HANDLER WITH LIVE PANEL & PROGRESS COUNTER =========
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     status = check_user_status(user_id)
-    if status in ["blocked", "expired"]: return
+    
+    if status in ["blocked", "expired"]:
+        await update.message.reply_text("❌ Subscription required.")
+        return
 
     document: Document = update.message.document
-    if not document.file_name.endswith(".txt"): return
+    if not document.file_name.endswith(".txt"):
+        await update.message.reply_text("❌ *Invalid File.* Please upload a .txt file format.", parse_mode="Markdown")
+        return
 
-    await update.message.reply_text("⏳ Processing file... please wait...")
+    initial_msg = await update.message.reply_text("📥 *Downloading and parsing file links...*", parse_mode="Markdown")
 
     file = await document.get_file()
     file_path = f"links_{user_id}.txt"
     await file.download_to_drive(file_path)
 
     links = read_links_file(file_path)
+    total = len(links)
     
+    live_count = 0
+    dead_count = 0
+    current_index = 0
+
+    await initial_msg.edit_text("⚙️ *Starting bulk checking process...*")
+
     async with httpx.AsyncClient(follow_redirects=True) as client:
         for url in links:
+            current_index += 1
             result = await check_url_async(client, url)
             
             STATS["total_checked"] += 1
+
             if is_link_live(result):
+                live_count += 1
                 STATS["total_live"] += 1
+                # إرسال اللايف فقط
+                await update.message.reply_text(
+                    f"✅ *LIVE HIT FOUND*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🔗 الموقع: {url}\n"
+                    f"📟 ريسبونس: `{result}`", 
+                    parse_mode="Markdown"
+                )
             else:
+                dead_count += 1
                 STATS["total_dead"] += 1
 
-            # القديم بيطبع كل موقع والريسبونس بتاعه ورا بعض ف الشات علطول
-            await update.message.reply_text(
-                f"🔗 URL: {url}\n"
-                f"📟 Response: {result}"
-            )
-            await asyncio.sleep(2)
+            # 📊 العداد المباشر لتحديث تقدم الفحص
+            if current_index % 1 == 0 or current_index == total:
+                panel_text = (
+                    f"📊 *عداد الفحص* 📊\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🔗 الموقع: {url}\n"
+                    f"📟 ريسبونس: `{result}`\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📝 الملف فيه: `{total}`\n"
+                    f"🔄 فحصت قد إيه: `{current_index}`\n"
+                    f"✅ عداد اللايف: `{live_count}`\n"
+                    f"━━━━━━━━━━━━━━━━━━━━"
+                )
+                try:
+                    await initial_msg.edit_text(panel_text, parse_mode="Markdown")
+                except:
+                    pass
 
-    await update.message.reply_text("🏁 Done Checking File!")
+            await asyncio.sleep(3)
+
+    final_stats = (
+        f"🏁 *BULK CHECK COMPLETED* 🏁\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📦 Total Scanned Links: `{total}`\n"
+        f"💎 Total Live Forwarded: `{live_count}`\n"
+        f"🛡️ Total Filtered/Dead: `{dead_count}`"
+    )
+    await update.message.reply_text(final_stats, parse_mode="Markdown")
     try: os.remove(file_path)
     except: pass
 
-# ========= RUN =========
+# ========= RUN ENGINE =========
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(API_TOKEN).build()
 
+    async def block_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        status = check_user_status(user_id)
+        if status == "blocked":
+            await update.message.reply_text("⛔ Access denied. You are blocked.")
+        elif status == "expired":
+            await update.message.reply_text(f"⚠️ Account not activated. Your ID: `{user_id}`", parse_mode="Markdown")
+
+    # Hooking Modules
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("site", site_command))
@@ -251,7 +406,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("block", block_user))
     app.add_handler(CommandHandler("unblock", unblock_user))
     app.add_handler(CommandHandler("revoke", revoke_user))
+    
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, block_text))
 
-    print("Old School Bot Engine Started...")
+    print("Bot Core Engine Started...")
     app.run_polling()
