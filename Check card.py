@@ -267,7 +267,7 @@ async def activate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📅 Expiry Date: {expire_date.strftime('%Y-%m-%d %H:%M:%S')}"
         )
     except:
-        await update.message.reply_text("❌ Wrong Format. Use: /activate <id> <amount> <d/h>")
+        await update.message.reply_text("❌ Wrong Format. Use: `/activate <id> <amount> <d/h>`")
 
 async def block_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id): return
@@ -296,7 +296,7 @@ async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_db(db)
         await update.message.reply_text(f"⚠️ SUBSCRIPTION REVOKED ➜ Subscription wiped for ID {user_target}.")
 
-# ========= FILE HANDLER WITH FIXED LIVE HUD PANEL =========
+# ========= FILE HANDLER WITH SMART ANTI-FLOOD HUD PANEL =========
 
 async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -311,6 +311,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Invalid File. Please upload a .txt file format.")
         return
 
+    # رسالة اللوحة الأساسية اللي هتتحدث
     initial_msg = await update.message.reply_text("📥 Downloading and parsing file links...")
 
     file = await document.get_file()
@@ -334,7 +335,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if is_link_live(result):
                 live_count += 1
                 STATS["total_live"] += 1
-                # بيبعت الرابط اللايف بس ف الشات
+                # بيبعت اللايف فوراً برة اللوحة عشان تضمن إن الهيتات منزلتش ومضاعتش
                 await update.message.reply_text(
                     f"🌟 LIVE HIT FOUND 🌟\n"
                     f"🔗 URL: {url}\n"
@@ -344,23 +345,26 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 dead_count += 1
                 STATS["total_dead"] += 1
 
-            # لوحة الفحص المباشرة (تم شطب الـ Markdown لتجنب التهنيج وعرض الداتا صح)
-            panel_text = (
-                f"📊 LIVE CHECKING MONITOR 📊\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🌐 Current Site: {url}\n"
-                f"📡 Site Response: {result}\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔄 Checked: [{current_index}/{total}]\n"
-                f"✅ Live Found Counter: [ {live_count} ]\n"
-                f"❌ Dead Filtered Counter: [ {dead_count} ]"
-            )
-            try:
-                await initial_msg.edit_text(panel_text)
-            except Exception as e:
-                pass
+            # ⚙️ ذكاء تحديث الـ HUD ضد تجميد تيليجرام (يحدث كل 5 روابط أو عند الوصول للنهاية)
+            if current_index % 5 == 0 or current_index == total or live_count > 0:
+                panel_text = (
+                    f"📊 LIVE CHECKING MONITOR 📊\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🌐 Current Site: {url}\n"
+                    f"📡 Site Response: {result}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🔄 Progress: [{current_index}/{total}]\n"
+                    f"✅ Live Found Counter: [ {live_count} ]\n"
+                    f"❌ Dead Filtered Counter: [ {dead_count} ]"
+                )
+                try:
+                    # تعديل الرسالة
+                    await initial_msg.edit_text(panel_text)
+                except Exception:
+                    # في حالة التيليجرام برضه عمل بلوك لثانية بيتخطاها عشان البوت ميقفش
+                    pass
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
     final_stats = (
         f"🏁 BULK CHECK COMPLETED 🏁\n"
